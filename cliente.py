@@ -1,28 +1,50 @@
 import socket
 import threading
 
-def recebe(s):
-    while True:
+HOST = "127.0.0.1"
+PORT = 5000
+
+parar = threading.Event()   # usado para as duas threads combinarem o fim
+
+def thread_1_envia(sock):
+    while not parar.is_set():
         try:
-            dados = s.recv(1024)
-            if not dados:
-                print("\n[Servidor desconectado]")
-                break
-            print(dados.decode('utf-8'), end='')
-        except Exception:
-            print("\n[Conexão com o servidor perdida]")
+            texto = input()
+        except (EOFError, KeyboardInterrupt):
+            texto = ":quit"
+
+        if parar.is_set():
             break
 
-c = socket.socket()
-c.connect(('127.0.0.1', 50000))
+        texto = texto.strip()
+        if not texto:
+            continue
 
-print(c.recv(1024).decode('utf-8'), end='')
+        try:
+            sock.sendall((texto + "\n").encode("utf-8"))
+        except OSError:
+            break
 
-threading.Thread(target=recebe, args=(c,), daemon=True).start()
+        if texto.lower() == ":quit":
+            parar.set()
+            break
 
-while True:
-    msg = input()
-    c.sendall(msg.encode('utf-8'))
-    if msg == ':quit': break
+    try:
+        sock.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
 
-c.close()
+def main():
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    sock.connect((HOST, PORT))
+    print(f"Conectado a {HOST}:{PORT}")
+    print("Digite uma mensagem, ou :nome <NOME> / :quit\n")
+
+    t1 = threading.Thread(target=thread_1_envia, args=(sock,))
+    t1.start()
+    t1.join()
+    sock.close()
+
+
+if __name__ == "__main__":
+    main()
