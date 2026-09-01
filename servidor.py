@@ -99,32 +99,63 @@ def exectuta(conn, texto):
         cmd = partes[0].lower()
         arg = partes[1].strip() if len(partes) > 1 else ""
 
-    if cmd == "nome":
-        if arg:
-            with lock:
-                antigo = clientes[conn]["nome"]
-                clientes[conn]["nome"] = arg
-            print(f"[T2] {antigo} agora se chama {arg}")
-            enviar(conn,f"{hora()}:seu nome agora eh {arg}")
-            broadcast(f"{hora()}:{antigo} agora se chama {arg}", exceto=conn)
+        if cmd == "nome":
+            if arg:
+                with lock:
+                    antigo = clientes[conn]["nome"]
+                    clientes[conn]["nome"] = arg
+                print(f"[T2] {antigo} agora se chama {arg}")
+                enviar(conn,f"{hora()}:seu nome agora eh {arg}")
+                broadcast(f"{hora()}:{antigo} agora se chama {arg}", exceto=conn)
+            else:
+                enviar(conn, f"{hora()}:Uso correto -> :nome <NOME>")
+
+        elif cmd == "quit":
+            enviar(conn, f"{hora()}:DESCONECTADO!!")
+            return False
+
         else:
-            enviar(conn, f"{hora()}:Uso correto -> :nome <NOME>")
-
-    elif cmd == "quit":
-        enviar(conn, f"{hora()}:DESCONECTADO!!")
-        return False
-
+                enviar(conn, f"{hora()}:Comando desconhecido: {cmd}")
     else:
-        enviar(conn, f"{hora()}:Comando desconhecido -> "{cmd}""")
+            enviar(conn, f"Voce digitou: {texto}")
+            broadcast(f'{info["nome"]}({hora()}): {texto}', exceto=conn)
 
-   else:
-    enviar(conn, f"Voce digitou: {texto}")
-    broadcast(f'{info["nome"]}({hora()}): {texto}', exceto=conn)
-
-return True
+    return True
 
 def desconecta(conn, addr):
- #terminar...
+    with lock:
+        info = clientes.pop(conn, None)
+        try:
+            conn.close()
+        except OSError:
+            pass
+        nome = info["nome"] if info else str(addr)
+        print(f"[-]{nome} desconectou")
+        broadcast(f"{hora()}:{nome} saiu da sala")
 
 def main():
-#terminar...
+    servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+    servidor.bind((HOST, PORT))
+    servidor.listen(5)
+    print(f"Servidor ouvimdo em {HOST}:{PORT}")
+
+    try:
+        while True:
+            conn, addr = servidor.accept()
+            nome_padrao = f"{addr[0]}:{addr[1]}"
+            with lock:
+                clientes[conn] = {"nome":nome_padrao, "addr": addr}
+            print(f"[+] conexao de {nome_padrao}")
+
+            enviar(conn, f"{hora()}:CONECTADO!!")
+
+            threading.Thread(target=thread_1_recebe, args=(conn, addr), daemon=True).start()
+            threading.Thread(target=thread_2_proccess, args=(conn, addr), daemon=True).start()
+    except KeyboardInterrupt:
+      print("\nServidor encerrando...")
+    finally:
+        servidor.close()
+
+if __name__ == "__main__":
+    main()
