@@ -1,94 +1,101 @@
 import socket
-import time
 import threading
+import time
 from datetime import datetime
 
-#Variáveis Globais
 HOST = "0.0.0.0"
 PORT = 5000
-INT_RELOG = 60
-DELAY = 0.2
-
+INTERVALO_RELOGIO = 60
+INTERVALO_VARREDURA = 0.2  
 lock = threading.Lock()
-comandos = []
+comandos = []  
 clientes = {}
 
+
 def hora():
-    """Retorna a hora atual formatada como string."""
     return datetime.now().strftime("%H:%M:%S")
 
+
 def data_hora():
-    """Retorna a data e hora atual formatada como string."""
     return datetime.now().strftime("%d/%m/%Y %H:%M:%S")
+
+
 def nome_de(conn, padrao="?"):
-    """Retorna o nome do cliente associado à conexão."""
+    """Devolve o nome atual do cliente, lendo a memoria compartilhada."""
     with lock:
         info = clientes.get(conn)
     return info["nome"] if info else padrao
+
+
 def enviar(conn, texto):
-    """Envia uma mensagem para o cliente."""
+    """Envia uma linha de texto para um cliente."""
     try:
-        conn.sendall((texto+ "\n").encode("utf-8"))
+        conn.sendall((texto + "\n").encode("utf-8"))
     except OSError:
         pass
 
+
 def broadcast(texto, exceto=None):
-    """Envia uma mensagem para todos os clientes conectados, exceto o especificado."""
+    """Envia uma linha para todos os clientes conectados."""
     with lock:
         destinos = [c for c in clientes if c is not exceto]
     for c in destinos:
         enviar(c, texto)
 
-#Thread 1 (Lê socket e salva na memória)
 
-def thread_1_recebe(conn,addr):
+def thread_1_recebe(conn, addr):
     buffer = ""
     try:
         while True:
             dados = conn.recv(1024)
-            if not dados:
+            if not dados:                      # cliente fechou a conexao
                 break
             buffer += dados.decode("utf-8", errors="ignore")
-            while "\n" in buffer:
+            while "\n" in buffer:              # separa mensagem por mensagem
                 linha, buffer = buffer.split("\n", 1)
                 linha = linha.strip()
                 if not linha:
                     continue
-                print(f"[T1]{nome_de(conn, f'{addr[0]}:{addr[1]}')}->{linha}")
+                print(f"[T1] {nome_de(conn, f'{addr[0]}:{addr[1]}')} -> {linha}")
                 with lock:
                     comandos.append((conn, linha))
     except OSError:
         pass
     finally:
+        # sinaliza para a thread 2 que este cliente saiu
         with lock:
             comandos.append((conn, ":quit"))
 
-#Thread 2 (varredura de memória e relogio)
 
-def thread_2_proccess(conn, addr):
+def thread_2_processa(conn, addr):
     ultimo_relogio = time.time()
     ativo = True
 
     while ativo:
+        # 1) retira da memoria compartilhada os comandos deste cliente
         with lock:
             meus = [item for item in comandos if item[0] is conn]
             for item in meus:
                 comandos.remove(item)
 
-            for _, texto in meus:
-                ativo = executa(conn, texto)
-                if not ativo:
-                    break
+        # 2) executa as acoes solicitadas
+        for _, texto in meus:
+            ativo = executa(conn, texto)
+            if not ativo:
+                break
 
-            if ativo and time.time() - ultimo_relogio >= INT_RELOG:
-                enviar(conn, f"[SERVIDOR] {data_hora()}")
-                ultimo_relogio = time.time()
+        # 3) envia data/hora periodicamente
+        if ativo and time.time() - ultimo_relogio >= INTERVALO_RELOGIO:
+            enviar(conn, f"[SERVIDOR] {data_hora()}")
+            ultimo_relogio = time.time()
 
-            time.sleep(DELAY)
+        time.sleep(INTERVALO_VARREDURA)
 
-        desconecta(conn, addr)
+    desconecta(conn, addr)
+
 
 def executa(conn, texto):
+    """Executa um comando/mensagem. Retorna False quando o cliente deve sair."""
     with lock:
         info = clientes.get(conn)
     if info is None:
@@ -105,33 +112,36 @@ def executa(conn, texto):
                     antigo = clientes[conn]["nome"]
                     clientes[conn]["nome"] = arg
                 print(f"[T2] {antigo} agora se chama {arg}")
-                enviar(conn,f"{hora()}:seu nome agora eh {arg}")
-                broadcast(f"{hora()}:{antigo} agora se chama {arg}", exceto=conn)
+                enviar(conn, f"{hora()}: seu nome agora e {arg}")
+                broadcast(f"{hora()}: {antigo} agora se chama {arg}", exceto=conn)
             else:
-                enviar(conn, f"{hora()}:Uso correto -> :nome <NOME>")
+                enviar(conn, f"{hora()}: uso correto -> :nome <NOME>")
 
         elif cmd == "quit":
-            enviar(conn, f"{hora()}:DESCONECTADO!!")
+            enviar(conn, f"{hora()}: DESCONECTADO!!")
             return False
 
         else:
-                enviar(conn, f"{hora()}:Comando desconhecido: {cmd}")
+            enviar(conn, f'{hora()}: comando desconhecido "{cmd}"')
     else:
-            enviar(conn, f"Voce digitou: {texto}")
-            broadcast(f'{info["nome"]}({hora()}): {texto}', exceto=conn)
+        # mensagem publica: eco para quem enviou, formatada para os demais
+        enviar(conn, f"Voce digitou: {texto}")
+        broadcast(f'{info["nome"]} ({hora()}): {texto}', exceto=conn)
 
     return True
+
 
 def desconecta(conn, addr):
     with lock:
         info = clientes.pop(conn, None)
-        try:
-            conn.close()
-        except OSError:
-            pass
-        nome = info["nome"] if info else str(addr)
-        print(f"[-]{nome} desconectou")
-        broadcast(f"{hora()}:{nome} saiu da sala")
+    try:
+        conn.close()
+    except OSError:
+        pass
+    nome = info["nome"] if info else str(addr)
+    print(f"[-] {nome} desconectou")
+    broadcast(f"{hora()}: {nome} saiu da sala")
+
 
 def main():
     servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -143,19 +153,22 @@ def main():
     try:
         while True:
             conn, addr = servidor.accept()
-            nome_padrao = f"{addr[0]}:{addr[1]}"
+            nome_padrao = f"{addr[0]}:{addr[1]}"   # nome default = IP:porta
             with lock:
-                clientes[conn] = {"nome":nome_padrao, "addr": addr}
+                clientes[conn] = {"nome": nome_padrao, "addr": addr}
             print(f"[+] conexao de {nome_padrao}")
 
-            enviar(conn, f"{hora()}:CONECTADO!!")
+            enviar(conn, f"{hora()}: CONECTADO!!")   # MSG1
 
-            threading.Thread(target=thread_1_recebe, args=(conn, addr), daemon=True).start()
-            threading.Thread(target=thread_2_proccess, args=(conn, addr), daemon=True).start()
+            threading.Thread(target=thread_1_recebe,
+                             args=(conn, addr), daemon=True).start()
+            threading.Thread(target=thread_2_processa,
+                             args=(conn, addr), daemon=True).start()
     except KeyboardInterrupt:
-      print("\nServidor encerrando...")
+        print("\nEncerrando servidor...")
     finally:
         servidor.close()
+
 
 if __name__ == "__main__":
     main()
