@@ -39,7 +39,7 @@ def broadcast(texto, exceto=None):
     for c in destinos:
         enviar(c, texto)
 
-#Thread 1 (Le socket e salva na memória)
+#Thread 1 (Lê socket e salva na memória)
 
 def thread_1_recebe(conn,addr):
     buffer = ""
@@ -63,7 +63,7 @@ def thread_1_recebe(conn,addr):
         with lock:
             comandos.append((conn, ":quit"))
 
-#Thread 2 (varredura de mamória e relogio)
+#Thread 2 (varredura de memória e relogio)
 
 def thread_2_proccess(conn, addr):
     ultimo_relogio = time.time()
