@@ -33,6 +33,25 @@ def thread_1_envia(sock):
         sock.shutdown(socket.SHUT_RDWR)
     except OSError:
         pass
+        
+def thread_2_recebe(sock):
+    buffer = ""
+    while not parar.is_set():
+        try:
+            dados = sock.recv(1024)
+        except OSError:
+            break
+        if not dados:
+            break
+
+        buffer += dados.decode("utf-8", errors="ignore")
+        while "\n" in buffer:
+            linha, buffer = buffer.split("\n", 1)
+            if linha.strip():
+                print(linha)
+
+    parar.set()
+    print("\n[conexao encerrada - pressione Enter para sair]")
 
 def main():
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -41,8 +60,12 @@ def main():
     print("Digite uma mensagem, ou :nome <NOME> / :quit\n")
 
     t1 = threading.Thread(target=thread_1_envia, args=(sock,))
+    t2 = threading.Thread(target=thread_2_recebe, args=(sock,))
     t1.start()
+    t2.start()
+
     t1.join()
+    t2.join(timeout = 1)
     sock.close()
 
 
