@@ -88,7 +88,7 @@ def thread_2_proccess(conn, addr):
 
         desconecta(conn, addr)
 
-def exectuta(conn, texto):
+def executa(conn, texto):
     with lock:
         info = clientes.get(conn)
     if info is None:
@@ -138,7 +138,7 @@ def main():
     servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     servidor.bind((HOST, PORT))
     servidor.listen(5)
-    print(f"Servidor ouvimdo em {HOST}:{PORT}")
+    print(f"Servidor ouvindo em {HOST}:{PORT}")
 
     try:
         while True:

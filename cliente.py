@@ -33,7 +33,6 @@ def thread_1_envia(sock):
         sock.shutdown(socket.SHUT_RDWR)
     except OSError:
         pass
-        
 def thread_2_recebe(sock):
     buffer = ""
     while not parar.is_set():
