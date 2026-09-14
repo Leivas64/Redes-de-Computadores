@@ -50,8 +50,40 @@ def broadcast(texto, exceto=None):
     for c in destinos:
         enviar(c, texto)
 
-# Working Thread: (A ser feito)
+# Working Thread: 
 
+def thread_trabalho(conn, addr):
+    nome_padrao = f"{addr[0]}:{addr[1]}"
+
+    with lock:
+        lotado = len(clientes) >= MAX_CLIENTES
+        if not lotado:
+            clientes[conn] = {"nome": nome_padrao, "addr": addr}
+        usadas = len(clientes)
+
+        if lotado:
+            print(f"[x] conexao de {nome_padrao} RECUSADA " 
+                  f"(limite de{MAX_CLIENTES} atingido)")
+            enviar(conn, f"{hora()}: SERVIDOR LOTADO!"
+                   f"tente novamente mais tarde")
+            time.sleep(0.5)
+            try:
+                conn.close()
+            except OSError:
+                pass
+            return
+    print(f"[+] {nome_padrao} conectado ({usadas}/{MAX_CLIENTES})")
+    enviar(conn, f"{hora()}: CONECTADO!")
+    broadcast(f"{hora()}: {nome_padrao} entrou na sala.", exceto=conn)
+
+    t1 = threading.Thread(target=thread_1_recebe, args=(conn, addr), daemon=True)
+    t2 = threading.Thread(target=thread_2_processa, args=(conn, addr), daemon=True)
+    t1.start()
+    t2.start()
+
+    t2.join()
+    t1.join(timeout=1)
+    print(f"[i] vaga liberada({ocupacao()}/{MAX_CLIENTES})")
 
 def thread_1_recebe(conn, addr):
     buffer = ""
@@ -127,9 +159,14 @@ def executa(conn, texto):
             else:
                 enviar(conn, f"{hora()}: uso correto -> :nome <NOME>")
 
-        elif cmd == "quit":
+        elif cmd in ("quit", "sair"):
             enviar(conn, f"{hora()}: DESCONECTADO!!")
             return False
+
+        elif cmd == "quem":
+            with lock:
+                nomes = [info["nome"] for info in clientes.values()]
+            enviar(conn, f"{hora()}: na sala ({len(nomes)}/{MAX_CLIENTES}): " + ", ".join(nomes))
 
         else:
             enviar(conn, f'{hora()}: comando desconhecido "{cmd}"')
@@ -161,30 +198,47 @@ def desconecta(conn, addr):
     broadcast(f"{hora()}: {nome} saiu da sala")
 
 
-def main(): #Adicionar funcionabilidade para administrar os clientes conectados...
+def main(): 
+    global MAX_CLIENTES
+
+    parser = argparse.ArgumentParser(
+        description="Servidor do chat multiusuário")
+    parser.add_argument("max_xlientes", nargs="?", type=int, default=DEFAULT_C,
+                         help="numero maximo de clientes simultaneos " f"(padrao: {DEFAULT_C})")
+    parser.add_argument("-p", "--porta", type=int, default=PORT, help=f"porta de escuta (padrao: {PORT})")
+    args = parser.parse_args()
+
+    if args.max_clientes < 1:
+        parser.error("max_clientes deve ser no minimo 1")
+    MAX_CLIENTES = args.max_clientes
+
     servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     servidor.bind((HOST, PORT))
     servidor.listen(5)
-    print(f"Servidor ouvindo em {HOST}:{PORT}")
+    print(f"Servidor ouvindo em {HOST}:{args.porta}| limite: {MAX_CLIENTES} clientes simultaneos")
 
     try:
         while True:
             conn, addr = servidor.accept()
-            nome_padrao = f"{addr[0]}:{addr[1]}"   # nome default = IP:porta
+            t = threading.Thread(target=thread_trabalho, args=(conn, addr), daemon=True)
+
+            t.start()
             with lock:
-                clientes[conn] = {"nome": nome_padrao, "addr": addr}
-            print(f"[+] conexao de {nome_padrao}")
-
-            enviar(conn, f"{hora()}: CONECTADO!!")   # MSG1
-
-            threading.Thread(target=thread_1_recebe,
-                             args=(conn, addr), daemon=True).start()
-            threading.Thread(target=thread_2_processa,
-                             args=(conn, addr), daemon=True).start()
+                trabalhadores.append(t)
+                trabalhadores[:] = [x for x in trabalhadores if x.is_alive()]
+            nome_padrao = f"{addr[0]}:{addr[1]}"   # nome default = IP:porta
     except KeyboardInterrupt:
         print("\nEncerrando servidor...")
     finally:
+        with lock:
+            abertas = list(clientes.keys())
+        for c in abertas:
+            enviar(c, f"{hora()}: SERVIDOR ENCERRADO")
+            try:
+                c.close()
+            except OSError:
+                pass
         servidor.close()
 
 
