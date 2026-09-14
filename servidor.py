@@ -203,7 +203,7 @@ def main():
 
     parser = argparse.ArgumentParser(
         description="Servidor do chat multiusuário")
-    parser.add_argument("max_xlientes", nargs="?", type=int, default=DEFAULT_C,
+    parser.add_argument("max_clientes", nargs="?", type=int, default=DEFAULT_C,
                          help="numero maximo de clientes simultaneos " f"(padrao: {DEFAULT_C})")
     parser.add_argument("-p", "--porta", type=int, default=PORT, help=f"porta de escuta (padrao: {PORT})")
     args = parser.parse_args()
