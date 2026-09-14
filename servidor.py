@@ -1,3 +1,4 @@
+import argparse
 import socket
 import threading
 import time
@@ -5,11 +6,15 @@ from datetime import datetime
 
 HOST = "0.0.0.0"
 PORT = 5000
+DEFAULT_C = 5
 INTERVALO_RELOGIO = 60
 INTERVALO_VARREDURA = 0.2  
+
 lock = threading.Lock()
 comandos = []  
 clientes = {}
+trabalhadores = []
+MAX_CLIENTES = DEFAULT_C
 
 
 def hora():
@@ -26,6 +31,9 @@ def nome_de(conn, padrao="?"):
         info = clientes.get(conn)
     return info["nome"] if info else padrao
 
+def ocupacao():
+    with lock:
+        return len(clientes)
 
 def enviar(conn, texto):
     """Envia uma linha de texto para um cliente."""
@@ -41,6 +49,8 @@ def broadcast(texto, exceto=None):
         destinos = [c for c in clientes if c is not exceto]
     for c in destinos:
         enviar(c, texto)
+
+# Working Thread: (A ser feito)
 
 
 def thread_1_recebe(conn, addr):
@@ -134,16 +144,24 @@ def executa(conn, texto):
 def desconecta(conn, addr):
     with lock:
         info = clientes.pop(conn, None)
+        pendentes = [item for item in comandos if item[0] is conn]
+        for item in pendentes:
+            comandos.remove(item)
+    try:
+        conn.shutdown(socket.SHUT_RDWR)
+    except OSError:
+        pass
     try:
         conn.close()
     except OSError:
         pass
-    nome = info["nome"] if info else str(addr)
+
+    nome = info["nome"] if info else f"{addr[0]}:{addr[1]}"
     print(f"[-] {nome} desconectou")
     broadcast(f"{hora()}: {nome} saiu da sala")
 
 
-def main():
+def main(): #Adicionar funcionabilidade para administrar os clientes conectados...
     servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
     servidor.bind((HOST, PORT))
