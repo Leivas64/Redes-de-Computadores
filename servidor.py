@@ -113,7 +113,10 @@ def thread_1_recebe(conn, addr):
             if not dados:                      # cliente fechou a conexao
                 break
             buffer += dados.decode("utf-8", errors="ignore")
-            # FALTA IMPLEMENTAR (Felipe 1): desconectar o cliente que enviar uma linha gigante sem quebra (limite TAMANHO_MAX_LINHA)
+            if len(buffer) > TAMANHO_MAX_LINHA and "\n" not in buffer:
+                print(f"[!] {nome_de(conn, f'{addr[0]}:{addr[1]}')} enviou linha muito longa")
+                enviar(conn, f"{hora()}: linha muito longa, desconectando")
+                break
             while "\n" in buffer:              # separa mensagem por mensagem
                 linha, buffer = buffer.split("\n", 1)
                 linha = linha.strip()
@@ -122,9 +125,9 @@ def thread_1_recebe(conn, addr):
                 print(f"[T1] {nome_de(conn, f'{addr[0]}:{addr[1]}')} -> {linha}")
                 with lock:
                     comandos.append((conn, linha))
-    except OSError:
-        # FALTA IMPLEMENTAR (Felipe 2): registrar no log do servidor que a conexao com o cliente foi perdida (exceto se o servidor estiver encerrando)
-        pass
+    except OSError as erro:
+        if not encerrando.is_set():
+            print(f"[!] conexao com {nome_de(conn, f'{addr[0]}:{addr[1]}')} perdida ({erro.__class__.__name__})")
     finally:
         # sinaliza para a thread 2 que este cliente saiu
         with lock:
@@ -136,28 +139,28 @@ def thread_2_processa(conn, addr):
     ultimo_relogio = time.time()
     ativo = True
 
-    # FALTA IMPLEMENTAR (Felipe 3): garantir que a vaga do cliente seja sempre liberada (desconecta) mesmo se der erro no loop abaixo
-    while ativo:
-        # 1) retira da memoria compartilhada os comandos deste cliente
-        with lock:
-            meus = [item for item in comandos if item[0] is conn]
-            for item in meus:
-                comandos.remove(item)
+try:
+        while ativo:
+            # 1) retira da memoria compartilhada os comandos deste cliente
+            with lock:
+                meus = [item for item in comandos if item[0] is conn]
+                for item in meus:
+                    comandos.remove(item)
 
-        # 2) executa as acoes solicitadas
-        for _, texto in meus:
-            ativo = executa(conn, texto)
-            if not ativo:
-                break
+            # 2) executa as acoes solicitadas
+            for _, texto in meus:
+                ativo = executa(conn, texto)
+                if not ativo:
+                    break
 
-        # 3) envia data/hora periodicamente
-        if ativo and time.time() - ultimo_relogio >= INTERVALO_RELOGIO:
-            enviar(conn, f"[SERVIDOR] {data_hora()}")
-            ultimo_relogio = time.time()
+            # 3) envia data/hora periodicamente
+            if ativo and time.time() - ultimo_relogio >= INTERVALO_RELOGIO:
+                enviar(conn, f"[SERVIDOR] {data_hora()}")
+                ultimo_relogio = time.time()
 
-        time.sleep(INTERVALO_VARREDURA)
-
-    desconecta(conn, addr)
+            time.sleep(INTERVALO_VARREDURA)
+finally:
+        desconecta(conn, addr)
 
 
 def executa(conn, texto):
@@ -239,16 +242,32 @@ def main():
         parser.error("max_clientes deve ser no minimo 1")
     MAX_CLIENTES = args.max_clientes
 
-    # FALTA IMPLEMENTAR (Felipe 4): tratar porta ocupada (bind), accept com timeout para o Ctrl+C funcionar, erro no accept e encerramento avisando os clientes; main deve retornar 0 ou 1
-    servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    servidor.bind((HOST, args.porta))
-    servidor.listen(5)
+    if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
+        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+    else:
+        servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+
+    try:
+        servidor.bind((HOST, args.porta))
+        servidor.listen(5)
+    except OSError as erro:
+        print(f"Nao foi possivel abrir a porta {args.porta} -> {erro}")
+        servidor.close()
+        return 1
+
+    servidor.settimeout(TIMEOUT_ACCEPT)
     print(f"Servidor ouvindo em {HOST}:{args.porta} | limite: {MAX_CLIENTES} clientes simultaneos")
 
     try:
         while True:
-            conn, addr = servidor.accept()
+            try:
+                conn, addr = servidor.accept()
+            except socket.timeout:
+                continue
+            except OSError as erro:
+                print(f"[!] falha ao aceitar conexao ({erro.__class__.__name__})")
+                continue
+
             t = threading.Thread(target=thread_trabalho, args=(conn, addr), daemon=True)
 
             t.start()
@@ -258,16 +277,25 @@ def main():
     except KeyboardInterrupt:
         print("\nEncerrando servidor...")
     finally:
+        encerrando.set()
+        servidor.close()
         with lock:
             abertas = list(clientes.keys())
         for c in abertas:
             enviar(c, f"{hora()}: SERVIDOR ENCERRADO")
             try:
+                c.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            try:
                 c.close()
             except OSError:
                 pass
-        servidor.close()
-
+        with lock:
+            pendentes = list(trabalhadores)
+        for t in pendentes:
+            t.join(timeout=1)
+    return 0
 
 if __name__ == "__main__":
     sys.exit(main())
