@@ -1,5 +1,6 @@
 import argparse
 import socket
+import sys
 import threading
 import time
 from datetime import datetime
@@ -8,9 +9,12 @@ HOST = "0.0.0.0"
 PORT = 5000
 DEFAULT_C = 5
 INTERVALO_RELOGIO = 60
-INTERVALO_VARREDURA = 0.2  
+INTERVALO_VARREDURA = 0.2
+TAMANHO_MAX_LINHA = 4096
+TIMEOUT_ACCEPT = 1
 
 lock = threading.Lock()
+encerrando = threading.Event()
 comandos = []  
 clientes = {}
 trabalhadores = []
@@ -37,8 +41,15 @@ def ocupacao():
 
 def enviar(conn, texto):
     """Envia uma linha de texto para um cliente."""
+    with lock:
+        info = clientes.get(conn)
+    trava = info["envio"] if info else None
     try:
-        conn.sendall((texto + "\n").encode("utf-8"))
+        if trava:
+            with trava:
+                conn.sendall((texto + "\n").encode("utf-8"))
+        else:
+            conn.sendall((texto + "\n").encode("utf-8"))
     except OSError:
         pass
 
@@ -46,7 +57,7 @@ def enviar(conn, texto):
 def broadcast(texto, exceto=None):
     """Envia uma linha para todos os clientes conectados."""
     with lock:
-        destinos = [c for c in clientes if c is not exceto]
+        destinos = [c for c, i in clientes.items() if c is not exceto and i["pronto"]]
     for c in destinos:
         enviar(c, texto)
 
@@ -54,26 +65,35 @@ def broadcast(texto, exceto=None):
 
 def thread_trabalho(conn, addr):
     nome_padrao = f"{addr[0]}:{addr[1]}"
+    try:
+        conn.settimeout(None)
+        conn.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
+    except OSError:
+        pass
 
     with lock:
         lotado = len(clientes) >= MAX_CLIENTES
         if not lotado:
-            clientes[conn] = {"nome": nome_padrao, "addr": addr}
+            clientes[conn] = {"nome": nome_padrao, "addr": addr,
+                              "envio": threading.Lock(), "pronto": False}
         usadas = len(clientes)
 
-        if lotado:
-            print(f"[x] conexao de {nome_padrao} RECUSADA " 
-                  f"(limite de{MAX_CLIENTES} atingido)")
-            enviar(conn, f"{hora()}: SERVIDOR LOTADO!"
-                   f"tente novamente mais tarde")
-            time.sleep(0.5)
-            try:
-                conn.close()
-            except OSError:
-                pass
-            return
+    if lotado:
+        print(f"[x] conexao de {nome_padrao} RECUSADA "
+              f"(limite de {MAX_CLIENTES} atingido)")
+        enviar(conn, f"{hora()}: SERVIDOR LOTADO! "
+               f"Tente novamente mais tarde")
+        time.sleep(0.5)
+        try:
+            conn.close()
+        except OSError:
+            pass
+        return
+
     print(f"[+] {nome_padrao} conectado ({usadas}/{MAX_CLIENTES})")
-    enviar(conn, f"{hora()}: CONECTADO!")
+    enviar(conn, f"{hora()}: CONECTADO!!")
+    with lock:
+        clientes[conn]["pronto"] = True
     broadcast(f"{hora()}: {nome_padrao} entrou na sala.", exceto=conn)
 
     t1 = threading.Thread(target=thread_1_recebe, args=(conn, addr), daemon=True)
@@ -93,6 +113,7 @@ def thread_1_recebe(conn, addr):
             if not dados:                      # cliente fechou a conexao
                 break
             buffer += dados.decode("utf-8", errors="ignore")
+            # FALTA IMPLEMENTAR (Felipe 1): desconectar o cliente que enviar uma linha gigante sem quebra (limite TAMANHO_MAX_LINHA)
             while "\n" in buffer:              # separa mensagem por mensagem
                 linha, buffer = buffer.split("\n", 1)
                 linha = linha.strip()
@@ -102,17 +123,20 @@ def thread_1_recebe(conn, addr):
                 with lock:
                     comandos.append((conn, linha))
     except OSError:
+        # FALTA IMPLEMENTAR (Felipe 2): registrar no log do servidor que a conexao com o cliente foi perdida (exceto se o servidor estiver encerrando)
         pass
     finally:
         # sinaliza para a thread 2 que este cliente saiu
         with lock:
-            comandos.append((conn, ":quit"))
+            if conn in clientes:
+                comandos.append((conn, ":quit"))
 
 
 def thread_2_processa(conn, addr):
     ultimo_relogio = time.time()
     ativo = True
 
+    # FALTA IMPLEMENTAR (Felipe 3): garantir que a vaga do cliente seja sempre liberada (desconecta) mesmo se der erro no loop abaixo
     while ativo:
         # 1) retira da memoria compartilhada os comandos deste cliente
         with lock:
@@ -193,6 +217,9 @@ def desconecta(conn, addr):
     except OSError:
         pass
 
+    if encerrando.is_set():
+        return
+
     nome = info["nome"] if info else f"{addr[0]}:{addr[1]}"
     print(f"[-] {nome} desconectou")
     broadcast(f"{hora()}: {nome} saiu da sala")
@@ -212,11 +239,12 @@ def main():
         parser.error("max_clientes deve ser no minimo 1")
     MAX_CLIENTES = args.max_clientes
 
+    # FALTA IMPLEMENTAR (Felipe 4): tratar porta ocupada (bind), accept com timeout para o Ctrl+C funcionar, erro no accept e encerramento avisando os clientes; main deve retornar 0 ou 1
     servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     servidor.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-    servidor.bind((HOST, PORT))
+    servidor.bind((HOST, args.porta))
     servidor.listen(5)
-    print(f"Servidor ouvindo em {HOST}:{args.porta}| limite: {MAX_CLIENTES} clientes simultaneos")
+    print(f"Servidor ouvindo em {HOST}:{args.porta} | limite: {MAX_CLIENTES} clientes simultaneos")
 
     try:
         while True:
@@ -227,7 +255,6 @@ def main():
             with lock:
                 trabalhadores.append(t)
                 trabalhadores[:] = [x for x in trabalhadores if x.is_alive()]
-            nome_padrao = f"{addr[0]}:{addr[1]}"   # nome default = IP:porta
     except KeyboardInterrupt:
         print("\nEncerrando servidor...")
     finally:
@@ -243,4 +270,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

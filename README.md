@@ -39,5 +39,27 @@ Como o projeto utiliza apenas bibliotecas padrão do Python, não é necessária
 
 1. Clonar o Repositório:
    ```bash
-   git clone [https://github.com/seu-usuario/seu-repositorio.git](https://github.com/seu-usuario/seu-repositorio.git)
-   cd seu-repositorio
+   git clone https://github.com/Leivas64/Redes-de-Computadores.git
+   cd Redes-de-Computadores
+   ```
+
+2. Iniciar o servidor (argumento opcional: número máximo de clientes, padrão 5):
+   ```bash
+   python servidor.py 3 -p 5000
+   ```
+
+3. Iniciar um ou mais clientes, cada um em um terminal:
+   ```bash
+   python cliente.py -s 127.0.0.1 -p 5000
+   ```
+
+### Comandos do cliente
+- Texto sem `:` no início: mensagem pública para todos os usuários.
+- `:nome <NOME>`: altera o nome do usuário.
+- `:quem`: lista os usuários na sala.
+- `:quit`: desconecta e encerra o cliente.
+
+## Tratamento de Exceções (Fase 3)
+
+- Cliente: timeout na conexão, mensagem clara quando o servidor está fora do ar, detecção de queda do servidor durante a sessão e encerramento limpo, sem traceback.
+- Servidor: queda abrupta de cliente libera a vaga e avisa os demais; linhas gigantes sem quebra desconectam apenas quem as enviou; falha ao abrir a porta gera mensagem em vez de erro; Ctrl+C encerra avisando os clientes.

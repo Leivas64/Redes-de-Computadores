@@ -1,13 +1,16 @@
 import argparse
+import os
 import socket
 import sys
 import threading
 
 HOST_PADRAO = "127.0.0.1"
 PORTA_PADRAO = 5000
-TIMEOUT_QUIT = 3       
+TIMEOUT_QUIT = 3
+TIMEOUT_CONEXAO = 5
 
-parar = threading.Event()   
+parar = threading.Event()
+saindo = threading.Event()
 
 def thread_1_envia(sock):
     while not parar.is_set():
@@ -26,10 +29,12 @@ def thread_1_envia(sock):
         try:
             sock.sendall((texto + "\n").encode("utf-8"))
         except OSError:
+            # FALTA IMPLEMENTAR (Maria 1): avisar o usuario que a conexao com o servidor foi perdida
             parar.set()
             break
 
         if texto.lower() in (":quit", ":sair"):
+            saindo.set()
             print("Solicitando desconexao ao servidor...")
             if not parar.wait(TIMEOUT_QUIT):
                 print("Servidor nao respondeu a tempo; encerrando assim mesmo.")
@@ -42,6 +47,7 @@ def thread_2_recebe(sock):
         try:
             dados = sock.recv(1024)
         except OSError:
+            # FALTA IMPLEMENTAR (Maria 2): avisar o usuario quando a conexao cair durante o recebimento
             break
         if not dados:                   
             break
@@ -52,7 +58,7 @@ def thread_2_recebe(sock):
             if linha.strip():
                 print(linha)
 
-    if not parar.is_set():
+    if not parar.is_set() and not saindo.is_set():
         print("[conexao encerrada pelo servidor]")
     parar.set()
 
@@ -66,6 +72,7 @@ def main():
     args = parser.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    # FALTA IMPLEMENTAR (Maria 3): timeout na conexao e keepalive no socket
     try:
         sock.connect((args.servidor, args.porta))
     except OSError as erro:
@@ -78,8 +85,9 @@ def main():
     threading.Thread(target=thread_1_envia, args=(sock,), daemon=True).start()
     threading.Thread(target=thread_2_recebe, args=(sock,), daemon=True).start()
 
+    # FALTA IMPLEMENTAR (Maria 4): fazer o Ctrl+C funcionar durante a espera
     try:
-        parar.wait()           
+        parar.wait()
     except KeyboardInterrupt:
         parar.set()
 
@@ -93,4 +101,6 @@ def main():
 
 
 if __name__ == "__main__":
-    sys.exit(main())
+    codigo = main()
+    sys.stdout.flush()
+    os._exit(codigo)
