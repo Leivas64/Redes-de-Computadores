@@ -29,9 +29,10 @@ def thread_1_envia(sock):
         try:
             sock.sendall((texto + "\n").encode("utf-8"))
         except OSError:
-            # FALTA IMPLEMENTAR (Maria 1): avisar o usuario que a conexao com o servidor foi perdida
-            parar.set()
-            break
+           if not parar.is_set():
+                print("[erro ao enviar: conexao com o servidor perdida]")
+           parar.set()
+           break
 
         if texto.lower() in (":quit", ":sair"):
             saindo.set()
@@ -47,8 +48,10 @@ def thread_2_recebe(sock):
         try:
             dados = sock.recv(1024)
         except OSError:
-            # FALTA IMPLEMENTAR (Maria 2): avisar o usuario quando a conexao cair durante o recebimento
-            break
+             if not parar.is_set() and not saindo.is_set():
+                print("[conexao com o servidor perdida]")
+                parar.set()
+             break
         if not dados:                   
             break
 
@@ -72,11 +75,14 @@ def main():
     args = parser.parse_args()
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-    # FALTA IMPLEMENTAR (Maria 3): timeout na conexao e keepalive no socket
     try:
+        sock.settimeout(TIMEOUT_CONEXAO)
         sock.connect((args.servidor, args.porta))
+        sock.settimeout(None)
+        sock.setsockopt(socket.SOL_SOCKET, socket.SO_KEEPALIVE, 1)
     except OSError as erro:
         print(f"Nao foi possivel conectar em {args.servidor}:{args.porta} -> {erro}")
+        sock.close()
         return 1
 
     print(f"Conectado a {args.servidor}:{args.porta}")
@@ -85,9 +91,9 @@ def main():
     threading.Thread(target=thread_1_envia, args=(sock,), daemon=True).start()
     threading.Thread(target=thread_2_recebe, args=(sock,), daemon=True).start()
 
-    # FALTA IMPLEMENTAR (Maria 4): fazer o Ctrl+C funcionar durante a espera
     try:
-        parar.wait()
+        while not parar.wait(0.5):
+            pass
     except KeyboardInterrupt:
         parar.set()
 
