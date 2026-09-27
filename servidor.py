@@ -139,7 +139,7 @@ def thread_2_processa(conn, addr):
     ultimo_relogio = time.time()
     ativo = True
 
-try:
+    try:
         while ativo:
             # 1) retira da memoria compartilhada os comandos deste cliente
             with lock:
@@ -159,7 +159,7 @@ try:
                 ultimo_relogio = time.time()
 
             time.sleep(INTERVALO_VARREDURA)
-finally:
+    finally:
         desconecta(conn, addr)
 
 
@@ -242,6 +242,7 @@ def main():
         parser.error("max_clientes deve ser no minimo 1")
     MAX_CLIENTES = args.max_clientes
 
+    servidor = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
     if hasattr(socket, "SO_EXCLUSIVEADDRUSE"):
         servidor.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
     else:
