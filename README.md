@@ -59,6 +59,16 @@ Como o projeto utiliza apenas bibliotecas padrão do Python, não é necessária
 - `:quem`: lista os usuários na sala.
 - `:quit`: desconecta e encerra o cliente.
 
+## Chat com Um Usuário (Fase 1)
+
+- Cliente: recebe `<HORARIO>: CONECTADO!!` ao conectar; a thread 1 lê o teclado e envia ao servidor (`:nome <NOME>`, `:quit` ou mensagem) e a thread 2 imprime tudo que chega do servidor.
+- Servidor: a thread 1 lê o socket e guarda os comandos em memória compartilhada; a thread 2 varre essa memória e executa a ação (definir nome, enviar a mensagem a todos ou desconectar); nome padrão `IP:porta`; eco `Voce digitou: MENSAGEM` para quem enviou e `NOME (horario): MENSAGEM` para os demais; data e hora enviadas a cada minuto.
+
+## Multi-Cliente (Fase 2)
+
+- Cliente: comando `:quit` solicita a desconexão e encerra a execução.
+- Servidor: uma thread de trabalho por conexão, com a thread principal voltando ao `accept()`; clientes independentes, com dados em memória compartilhada protegida por lock; limite de clientes por linha de comando (`python servidor.py 3`); com o servidor lotado o cliente recebe `SERVIDOR LOTADO!` no lugar de `CONECTADO!!` e a conexão é fechada; no `:quit` a conexão TCP é fechada, os dados do cliente são removidos e a vaga é liberada.
+
 ## Tratamento de Exceções (Fase 3)
 
 - Cliente: timeout na conexão, mensagem clara quando o servidor está fora do ar, detecção de queda do servidor durante a sessão e encerramento limpo, sem traceback.
